@@ -56,7 +56,7 @@ export default function SuppliersPage() {
 
       <div className="max-w-[1400px] mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-10">
         
-        {/* الجانب الأيمن: كارت الإضافة بنظام Neumorphism خفيف */}
+        {/* الجانب الأيمن: تسجيل مورد */}
         <div className="lg:col-span-4">
           <div className="bg-white rounded-[2.5rem] p-8 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-50 sticky top-10">
             <h2 className="text-xl font-black text-slate-900 mb-8 border-r-4 border-indigo-600 pr-4">تسجيل مورد</h2>
@@ -97,10 +97,9 @@ export default function SuppliersPage() {
           </div>
         </div>
 
-        {/* الجانب الأيسر: القائمة الاحترافية */}
+        {/* الجانب الأيسر: القائمة */}
         <div className="lg:col-span-8 space-y-8">
           
-          {/* بار البحث الذكي */}
           <div className="relative group">
             <input 
               type="text" 
@@ -111,46 +110,48 @@ export default function SuppliersPage() {
             <span className="absolute right-6 top-6 opacity-30 text-xl">🔍</span>
           </div>
 
-          {/* الجدول المطور */}
           <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-100 overflow-hidden border border-slate-50">
             <table className="w-full text-right border-collapse">
               <thead>
                 <tr className="bg-slate-50/50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-100">
                   <th className="p-6 pr-10">المورد</th>
                   <th className="p-6 text-center">الحالة المالية</th>
-                  <th className="p-6 text-left pl-10">الإجراءات</th>
+                  <th className="p-6 text-center">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {suppliers.filter(s => s.name.includes(searchTerm)).map(s => (
                   <tr key={s.id} className="group hover:bg-indigo-50/30 transition-all duration-300">
                     <td className="p-6 pr-10">
-                      <p className="font-black text-slate-800 text-lg group-hover:text-indigo-600 transition-colors">{s.name}</p>
-                      <p className="text-xs font-bold text-slate-400 mt-1">{s.phone || "لا يوجد هاتف مسجل"}</p>
+                      <p className="font-black text-slate-800 text-lg">{s.name}</p>
+                      <p className="text-xs font-bold text-slate-400 mt-1">{s.phone || "لا يوجد هاتف"}</p>
                     </td>
                     <td className="p-6 text-center">
                       <div className={`inline-flex flex-col items-center px-6 py-2 rounded-2xl ${s.balance > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                        <span className="text-[10px] font-black uppercase mb-1 opacity-60">{s.balance > 0 ? 'مديونية' : 'مستقر'}</span>
-                        <span className="text-xl font-black tracking-tighter">{s.balance?.toLocaleString()} <small className="text-[10px]">ج.م</small></span>
+                        <span className="text-[10px] font-black uppercase mb-1 opacity-60">الرصيد</span>
+                        <span className="text-xl font-black tracking-tighter">{s.balance?.toLocaleString()}</span>
                       </div>
                     </td>
-                    <td className="p-6 text-left pl-10">
-                      <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-all translate-x-4 group-hover:translate-x-0">
-                        <Link href={`/suppliers/${s.id}`} className="bg-slate-900 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-indigo-600 transition-colors shadow-lg" title="فاتورة">📦</Link>
-                        <button onClick={() => handleQuickPayment(s.id, s.balance, s.name)} className="bg-slate-900 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-orange-500 transition-colors shadow-lg" title="سداد">💸</button>
-                        <Link href={`/suppliers/${s.id}/history`} className="bg-slate-900 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-blue-600 transition-colors shadow-lg" title="السجل">📜</Link>
+                    <td className="p-6 text-center">
+                      {/* الأزرار الآن ظاهرة دائماً ومرتبة بشكل جميل */}
+                      <div className="flex gap-3 justify-center">
+                        <Link href={`/suppliers/${s.id}`} className="bg-slate-800 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-indigo-600 transition-all shadow-md active:scale-90" title="فاتورة توريد">
+                          فاتورة 
+                        </Link>
+                        <button onClick={() => handleQuickPayment(s.id, s.balance, s.name)} className="bg-slate-800 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-orange-500 transition-all shadow-md active:scale-90" title="سداد سريع">
+                          سداد
+                        </button>
+                        <Link href={`/suppliers/${s.id}/history`} className="bg-slate-800 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-blue-600 transition-all shadow-md active:scale-90" title="سجل المعاملات">
+                          سجل 
+                        </Link>
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {suppliers.length === 0 && !loading && (
-              <div className="p-20 text-center font-black text-slate-200 italic tracking-widest text-2xl">NO DATA FOUND</div>
-            )}
           </div>
         </div>
-
       </div>
     </div>
   );
