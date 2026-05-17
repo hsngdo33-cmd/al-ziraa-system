@@ -38,12 +38,12 @@ export default function EditSupplierInvoicePage({ params }: { params: Promise<an
     setIsSaving(true);
 
     try {
-      // 1. حساب الإجمالي الجديد والفرق
+      // 1. حساب الإجمالي الجديد والفرق (دعم الكسور باستخدام Number)
       const newTotal = items.reduce((acc, i) => acc + (Number(i.qty) * Number(i.price)), 0);
       const diff = newTotal - transaction.amount;
 
-      // 2. معالجة المخزن (زي ما عملنا في الواردات بس للعكس)
-      // أ- إرجاع المخزن لأصله (خصم الكميات القديمة اللي دخلت من المورد)
+      // 2. معالجة المخزن
+      // أ- إرجاع المخزن لأصله (خصم الكميات القديمة - تدعم الكسور)
       for (const old of transaction.items) {
         if (old.id) {
           await supabase.rpc('decrement_stock', { 
@@ -53,7 +53,7 @@ export default function EditSupplierInvoicePage({ params }: { params: Promise<an
         }
       }
 
-      // ب- إضافة الكميات الجديدة المعدلة للمخزن
+      // ب- إضافة الكميات الجديدة المعدلة للمخزن (تدعم الكسور)
       for (const newItem of items) {
         if (newItem.id) {
           await supabase.rpc('increment_stock', { 
@@ -122,8 +122,10 @@ export default function EditSupplierInvoicePage({ params }: { params: Promise<an
                 <tr key={index} className="hover:bg-slate-50 transition-colors">
                   <td className="p-5 font-black text-slate-900">{item.name}</td>
                   <td className="p-5 text-center">
+                    {/* تعديل: إضافة step="any" لدعم الكسور */}
                     <input 
                       type="number"
+                      step="any"
                       value={item.qty}
                       onChange={(e) => {
                         const newItems = [...items];
@@ -134,8 +136,10 @@ export default function EditSupplierInvoicePage({ params }: { params: Promise<an
                     />
                   </td>
                   <td className="p-5 text-center font-black">
+                    {/* تعديل: إضافة step="any" لدعم الكسور */}
                     <input 
                       type="number"
+                      step="any"
                       value={item.price}
                       onChange={(e) => {
                         const newItems = [...items];
@@ -146,7 +150,8 @@ export default function EditSupplierInvoicePage({ params }: { params: Promise<an
                     />
                   </td>
                   <td className="p-5 text-left font-black text-slate-900">
-                    {(Number(item.qty) * Number(item.price)).toLocaleString()}
+                    {/* تعديل العرض ليظهر خانتين عشريتين عند الحاجة */}
+                    {(Number(item.qty) * Number(item.price)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
               ))}
@@ -158,7 +163,8 @@ export default function EditSupplierInvoicePage({ params }: { params: Promise<an
           <div>
             <p className="text-[10px] text-slate-400 font-black mb-1 uppercase tracking-widest">إجمالي الحساب الجديد</p>
             <h3 className="text-4xl font-black italic">
-              {items.reduce((acc, i) => acc + (Number(i.qty) * Number(i.price)), 0).toLocaleString()} 
+              {/* تعديل العرض الإجمالي لدعم الكسور */}
+              {items.reduce((acc, i) => acc + (Number(i.qty) * Number(i.price)), 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} 
               <small className="text-xs mr-2 opacity-50">ج.م</small>
             </h3>
           </div>

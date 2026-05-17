@@ -10,12 +10,11 @@ export default function SupplierInvoiceFinal() {
   const [supplier, setSupplier] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [cart, setCart] = useState<any[]>([]);
-  const [cashPaid, setCashPaid] = useState<number>(0);
+  const [cashPaid, setCashPaid] = useState<any>(0); // تغيير لـ any لدعم الكسور أثناء الكتابة
   const [searchTerm, setSearchTerm] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   
-  // الحالة الابتدائية للصنف الجديد مع وحدات القياس المطلوبة
   const [newProd, setNewProd] = useState({ 
     name: "", 
     unit: "كيلو", 
@@ -36,37 +35,39 @@ export default function SupplierInvoiceFinal() {
 
   const addToCart = (p: any) => {
     if (cart.find(item => item.id === p.id)) return alert("الصنف مضاف بالفعل");
-    setCart([...cart, { ...p, qty: 1, p_price: p.purchase_price }]);
+    setCart([...cart, { ...p, qty: "1", p_price: p.purchase_price }]); // الكمية نص لسهولة الكتابة
   };
 
-  const updateCartItem = (id: string, field: string, value: number) => {
+  const updateCartItem = (id: string, field: string, value: any) => {
     setCart(cart.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
-  const totalInvoice = cart.reduce((acc, item) => acc + (item.qty * item.p_price), 0);
+  const totalInvoice = cart.reduce((acc, item) => acc + (Number(item.qty) * Number(item.p_price)), 0);
 
   const saveInvoice = async () => {
     if (cart.length === 0) return alert("الفاتورة فارغة!");
     setIsSaving(true);
     try {
       await supabase.from("transactions").insert([{
-        supplier_id: id, amount: totalInvoice, type: "فاتورة توريد",
-        items: cart.map(i => ({ name: i.name, qty: i.qty, price: i.p_price })),
+        supplier_id: id, 
+        amount: totalInvoice, 
+        type: "فاتورة توريد",
+        items: cart.map(i => ({ name: i.name, qty: Number(i.qty), price: Number(i.p_price), id: i.id })),
         description: `توريد بضاعة`
       }]);
 
-      if (cashPaid > 0) {
+      if (Number(cashPaid) > 0) {
         await supabase.from("transactions").insert([{
-          supplier_id: id, amount: cashPaid, type: "سداد نقدي", description: "دفعة من الفاتورة"
+          supplier_id: id, amount: Number(cashPaid), type: "سداد نقدي", description: "دفعة من الفاتورة"
         }]);
       }
 
       await supabase.from("suppliers").update({ 
-        balance: (supplier.balance || 0) + (totalInvoice - cashPaid) 
+        balance: (supplier.balance || 0) + (totalInvoice - Number(cashPaid)) 
       }).eq("id", id);
 
       for (const item of cart) {
-        await supabase.rpc('increment_stock', { row_id: item.id, amount: item.qty });
+        await supabase.rpc('increment_stock', { row_id: item.id, amount: Number(item.qty) });
       }
 
       alert("تم الحفظ بنجاح ✅");
@@ -77,12 +78,11 @@ export default function SupplierInvoiceFinal() {
   return (
     <div className="min-h-screen bg-[#f1f5f9] text-right font-sans pb-10 text-slate-900" dir="rtl">
       
-      {/* هيدر نحيف مع زر الرجوع */}
       <header className="bg-[#0f172a] text-white p-4 sticky top-0 z-50 shadow-md">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Link href="/suppliers" className="bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-all" title="رجوع">
-               ⬅️ رجوع
+            <Link href="/suppliers" className="bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-all">
+                ⬅️ رجوع
             </Link>
             <div className="flex items-center gap-2">
               <span className="text-xl">📥</span>
@@ -95,12 +95,11 @@ export default function SupplierInvoiceFinal() {
 
       <main className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-4 gap-6">
         
-        {/* الجانب الأيمن: اختيار الأصناف */}
         <div className="lg:col-span-1 space-y-3">
           <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
             <input 
               placeholder="🔍 ابحث في الأصناف..." 
-              className="w-full p-2 bg-slate-50 rounded-lg text-sm font-bold outline-none border border-slate-200 text-slate-900 placeholder:text-slate-400"
+              className="w-full p-2 bg-slate-50 rounded-lg text-sm font-bold outline-none border border-slate-200 text-slate-900"
               onChange={(e)=>setSearchTerm(e.target.value)}
             />
           </div>
@@ -120,7 +119,6 @@ export default function SupplierInvoiceFinal() {
           </div>
         </div>
 
-        {/* الجانب الأيسر: جدول الفاتورة */}
         <div className="lg:col-span-3 space-y-4">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <table className="w-full text-right text-sm">
@@ -141,27 +139,23 @@ export default function SupplierInvoiceFinal() {
                        <p className="text-[10px] text-slate-400 font-bold">{item.unit}</p>
                     </td>
                     <td className="p-4 text-center">
-                      <input type="number" value={item.qty} onChange={(e)=>updateCartItem(item.id, 'qty', Number(e.target.value))} className="w-16 p-1.5 bg-white border border-slate-200 rounded text-center font-black text-slate-900 focus:border-emerald-500 outline-none" />
+                      <input type="number" step="any" value={item.qty} onChange={(e)=>updateCartItem(item.id, 'qty', e.target.value)} className="w-16 p-1.5 bg-white border border-slate-200 rounded text-center font-black text-slate-900 focus:border-emerald-500 outline-none" />
                     </td>
                     <td className="p-4 text-center">
-                      <input type="number" value={item.p_price} onChange={(e)=>updateCartItem(item.id, 'p_price', Number(e.target.value))} className="w-20 p-1.5 bg-white border border-slate-200 rounded text-center font-black text-rose-600 focus:border-rose-500 outline-none" />
+                      <input type="number" step="any" value={item.p_price} onChange={(e)=>updateCartItem(item.id, 'p_price', e.target.value)} className="w-20 p-1.5 bg-white border border-slate-200 rounded text-center font-black text-rose-600 focus:border-rose-500 outline-none" />
                     </td>
-                    <td className="p-4 text-center font-black text-slate-900 text-lg">{(item.qty * item.p_price).toLocaleString()}</td>
+                    <td className="p-4 text-center font-black text-slate-900 text-lg">{(Number(item.qty) * Number(item.p_price)).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
                     <td className="p-4 text-left"><button onClick={()=>setCart(cart.filter(i=>i.id!==item.id))} className="text-rose-300 hover:text-rose-600 text-xl">✕</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {cart.length === 0 && (
-              <div className="py-20 text-center text-slate-300 font-black italic">الفاتورة فارغة.. أضف أصناف من اليمين</div>
-            )}
           </div>
 
-          {/* الفوتر - الأرقام واضحة جداً */}
           <div className="bg-[#0f172a] rounded-2xl p-6 text-white flex flex-wrap justify-between items-center gap-6 shadow-xl">
             <div className="space-y-1">
               <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">إجمالي المبلغ المطلوب</p>
-              <h2 className="text-4xl font-black text-white">{totalInvoice.toLocaleString()} <small className="text-sm font-normal opacity-50">ج.م</small></h2>
+              <h2 className="text-4xl font-black text-white">{totalInvoice.toLocaleString(undefined, {maximumFractionDigits: 2})} <small className="text-sm font-normal opacity-50">ج.م</small></h2>
             </div>
             
             <div className="flex gap-6 items-center">
@@ -169,16 +163,13 @@ export default function SupplierInvoiceFinal() {
                 <p className="text-[10px] font-black text-slate-400 mb-1">دفع نقدي (كاش)</p>
                 <input 
                   type="number" 
+                  step="any"
                   value={cashPaid} 
-                  onChange={(e)=>setCashPaid(Number(e.target.value))} 
+                  onChange={(e)=>setCashPaid(e.target.value)} 
                   className="bg-transparent text-2xl font-black text-emerald-400 w-24 text-center border-b-2 border-emerald-500/30 outline-none focus:border-emerald-500" 
                 />
               </div>
-              <button 
-                onClick={saveInvoice} 
-                disabled={isSaving || cart.length===0} 
-                className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 py-4 rounded-xl font-black text-lg shadow-lg transition-all active:scale-95 disabled:opacity-30"
-              >
+              <button onClick={saveInvoice} disabled={isSaving || cart.length===0} className="bg-emerald-500 hover:bg-emerald-600 text-white px-10 py-4 rounded-xl font-black text-lg shadow-lg transition-all disabled:opacity-30">
                 {isSaving ? "جاري الحفظ..." : "اعتماد وتحديث المخزن ✅"}
               </button>
             </div>
@@ -186,64 +177,34 @@ export default function SupplierInvoiceFinal() {
         </div>
       </main>
 
-      {/* مودال الصنف الجديد - مع وحدات القياس والكلام الأسود */}
+      {/* مودال الصنف الجديد */}
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl space-y-6">
-            <h3 className="text-xl font-black text-slate-900 border-r-4 border-emerald-500 pr-3">إضافة صنف جديد للمخزن</h3>
-            
-            <div className="space-y-4 text-slate-900">
-              <div className="space-y-1">
-                <label className="text-xs font-black text-slate-400 mr-2">اسم الصنف</label>
-                <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:border-emerald-500" placeholder="مثال: ذرة صفراء" onChange={(e)=>setNewProd({...newProd, name: e.target.value})} />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-black text-slate-400 mr-2">وحدة القياس</label>
-                <select 
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:border-emerald-500"
-                  value={newProd.unit}
-                  onChange={(e)=>setNewProd({...newProd, unit: e.target.value})}
-                >
-                  <option value="كيلو">كيلو</option>
-                  <option value="جرام">جرام</option>
-                  <option value="لتر">لتر</option>
-                  <option value="ملي">ملي</option>
-                  <option value="عبوة">عبوة</option>
-                  <option value="شكارة">شكارة</option>
-                  <option value="طن">طن</option>
-                </select>
-              </div>
-
+            <h3 className="text-xl font-black text-slate-900 border-r-4 border-emerald-500 pr-3">إضافة صنف جديد</h3>
+            <div className="space-y-4">
+              <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold" placeholder="اسم الصنف" onChange={(e)=>setNewProd({...newProd, name: e.target.value})} />
+              <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold" value={newProd.unit} onChange={(e)=>setNewProd({...newProd, unit: e.target.value})}>
+                <option value="كيلو">كيلو</option>
+                <option value="جرام">جرام</option>
+                <option value="لتر">لتر</option>
+                <option value="ملي">ملي</option>
+                <option value="عبوة">عبوة</option>
+                <option value="شكارة">شكارة</option>
+                <option value="طن">طن</option>
+              </select>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-slate-400 mr-2">سعر الشراء</label>
-                  <input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-rose-600 outline-none" placeholder="0.00" onChange={(e)=>setNewProd({...newProd, purchase_price: e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-slate-400 mr-2">سعر البيع</label>
-                  <input type="number" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-emerald-600 outline-none" placeholder="0.00" onChange={(e)=>setNewProd({...newProd, sale_price: e.target.value})} />
-                </div>
+                <input type="number" step="any" className="p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold" placeholder="سعر الشراء" onChange={(e)=>setNewProd({...newProd, purchase_price: e.target.value})} />
+                <input type="number" step="any" className="p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold" placeholder="سعر البيع" onChange={(e)=>setNewProd({...newProd, sale_price: e.target.value})} />
               </div>
             </div>
-
-            <div className="flex gap-3 pt-2">
-              <button 
-                onClick={async ()=>{
+            <div className="flex gap-3">
+              <button onClick={async ()=>{
                   if(!newProd.name || !newProd.purchase_price) return alert("اكمل البيانات يا عمدة!");
                   const {data} = await supabase.from("products").insert([newProd]).select().single();
-                  if(data) { 
-                    setProducts([...products, data]); 
-                    addToCart(data); 
-                    setShowAddModal(false); 
-                    alert("تمت الإضافة للمخزن بنجاح ✅");
-                  }
-                }} 
-                className="flex-1 bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg hover:bg-emerald-700 transition-all"
-              >
-                حفظ وإضافة للفاتورة
-              </button>
-              <button onClick={()=>setShowAddModal(false)} className="px-6 py-4 bg-slate-100 text-slate-500 rounded-xl font-black hover:bg-slate-200 transition-all">إلغاء</button>
+                  if(data) { setProducts([...products, data]); addToCart(data); setShowAddModal(false); }
+                }} className="flex-1 bg-emerald-600 text-white py-4 rounded-xl font-black">حفظ وإضافة</button>
+              <button onClick={()=>setShowAddModal(false)} className="px-6 py-4 bg-slate-100 rounded-xl font-black">إلغاء</button>
             </div>
           </div>
         </div>
@@ -252,8 +213,6 @@ export default function SupplierInvoiceFinal() {
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
         body { font-family: 'Cairo', sans-serif; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
       `}</style>
     </div>
   );
