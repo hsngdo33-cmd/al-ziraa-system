@@ -4,183 +4,260 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
 export default function EditSupplierInvoicePage({ params }: { params: Promise<any> }) {
-  const router = useRouter();
-  const resolvedParams = use(params);
-  const supplierId = resolvedParams.id;
-  const transId = resolvedParams.transId;
+  const router          = useRouter();
+  const resolvedParams  = use(params);
+  const supplierId      = resolvedParams.id;
+  const transId         = resolvedParams.transId;
 
   const [transaction, setTransaction] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems]             = useState<any[]>([]);
+  const [isSaving, setIsSaving]       = useState(false);
+  const [loading, setLoading]         = useState(true);
+  const [note, setNote]               = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  useEffect(() => {
-    if (transId) loadTransaction();
-  }, [transId]);
+  useEffect(() => { if (transId) loadTransaction(); }, [transId]);
 
   async function loadTransaction() {
     setLoading(true);
     const { data, error } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("id", transId)
-      .single();
-
-    if (data) {
+      .from("transactions").select("*").eq("id", transId).single();
+    if (error) { alert("مشكلة في تحميل الفاتورة"); }
+    else {
       setTransaction(JSON.parse(JSON.stringify(data)));
-      setItems(JSON.parse(JSON.stringify(data.items || [])));
+      // جلب الوحدات
+      const itemsWithUnits = await Promise.all(
+        (data.items || []).map(async (item: any) => {
+          const { data: p } = await supabase.from("products").select("unit").eq("id", item.id).maybeSingle();
+          return { ...item, unit: p?.unit || item.unit || "وحدة" };
+        })
+      );
+      setItems(itemsWithUnits);
+      setNote(data.description || "");
     }
     setLoading(false);
   }
 
-  const handleUpdate = async () => {
+  async function handleUpdate() {
     if (isSaving) return;
     setIsSaving(true);
-
+    setShowConfirm(false);
     try {
-      // 1. حساب الإجمالي الجديد والفرق (دعم الكسور باستخدام Number)
-      const newTotal = items.reduce((acc, i) => acc + (Number(i.qty) * Number(i.price)), 0);
-      const diff = newTotal - transaction.amount;
+      const newTotal = items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0);
+      const diff     = newTotal - transaction.amount;
 
-      // 2. معالجة المخزن
-      // أ- إرجاع المخزن لأصله (خصم الكميات القديمة - تدعم الكسور)
-      for (const old of transaction.items) {
-        if (old.id) {
-          await supabase.rpc('decrement_stock', { 
-            row_id: String(old.id), 
-            amount: Number(old.qty) 
-          });
-        }
+      // إرجاع الكميات القديمة (decrement = إزالة من المخزن ما أضفناه قبل)
+      for (const old of transaction.items || []) {
+        if (old.id) await supabase.rpc("decrement_stock", { row_id: String(old.id), amount: Number(old.qty) });
+      }
+      // إضافة الكميات الجديدة
+      for (const item of items) {
+        if (item.id) await supabase.rpc("increment_stock", { row_id: String(item.id), amount: Number(item.qty) });
       }
 
-      // ب- إضافة الكميات الجديدة المعدلة للمخزن (تدعم الكسور)
-      for (const newItem of items) {
-        if (newItem.id) {
-          await supabase.rpc('increment_stock', { 
-            row_id: String(newItem.id), 
-            amount: Number(newItem.qty) 
-          });
-        }
-      }
+      // تحديث رصيد المورد
+      const { data: supp } = await supabase.from("suppliers").select("balance").eq("id", supplierId).single();
+      await supabase.from("suppliers")
+        .update({ balance: (supp?.balance || 0) + diff })
+        .eq("id", supplierId);
 
-      // 3. تحديث مديونية المورد (Supplier Balance)
-      const { data: supplier } = await supabase
-        .from("suppliers")
-        .select("balance")
-        .eq("id", supplierId)
-        .single();
-      
-      const updatedBalance = (supplier?.balance || 0) + diff;
-      await supabase.from("suppliers").update({ balance: updatedBalance }).eq("id", supplierId);
+      // تحديث الفاتورة (بدون الوحدة عشان تفضل الداتا نضيفة)
+      await supabase.from("transactions").update({
+        amount: newTotal,
+        items: items.map(({ unit, ...rest }) => rest),
+        description: note || `تعديل فاتورة توريد — ${new Date().toLocaleString("ar-EG")}`,
+      }).eq("id", transId);
 
-      // 4. تحديث سجل الفاتورة نفسه
-      const { error: finalError } = await supabase
-        .from("transactions")
-        .update({
-          amount: newTotal,
-          items: items,
-          description: `تعديل فاتورة توريد - مخزن معدل`
-        })
-        .eq("id", transId);
-
-      if (finalError) throw finalError;
-
-      alert("تم التعديل وتحديث المخزن والمديونية بنجاح! ✅");
       router.push(`/suppliers/${supplierId}/history`);
-
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      alert("حدث خطأ أثناء التحديث");
-    } finally {
-      setIsSaving(false);
-    }
-  };
+      alert("حصلت مشكلة — راجع الـ Console");
+    } finally { setIsSaving(false); }
+  }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-orange-600">جاري التحميل...</div>;
+  // ── Totals ──
+  const newTotal = items.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0);
+  const diff     = transaction ? newTotal - transaction.amount : 0;
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-[#f1f5f9] font-black text-slate-400 text-xl" dir="rtl">
+      ⏳ جاري تحميل الفاتورة...
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] p-4 text-right font-sans" dir="rtl">
-      <div className="max-w-3xl mx-auto space-y-6">
-        
-        <div className="bg-white p-6 rounded-[2rem] shadow-sm flex justify-between items-center border border-slate-200">
-           <h2 className="text-xl font-black text-slate-800">تعديل أصناف فاتورة المورد 🚚</h2>
-           <button onClick={() => router.back()} className="text-slate-400 font-bold hover:text-rose-500 transition-all">إلغاء ❌</button>
-        </div>
+    <div className="min-h-screen bg-[#f1f5f9] text-right font-sans pb-16" dir="rtl">
 
-        <div className="bg-white rounded-[2rem] shadow-md border border-slate-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-slate-50 text-[11px] font-black text-slate-400 border-b uppercase tracking-widest">
+      {/* ══ Header ══ */}
+      <header className="bg-[#0f172a] text-white p-5 shadow-xl sticky top-0 z-40 mb-6">
+        <div className="max-w-3xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => router.back()}
+              className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-xs font-black transition-all"
+            >
+              ⬅️ رجوع
+            </button>
+            <div>
+              <h1 className="text-lg font-black">تعديل فاتورة التوريد 🚚</h1>
+              <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                {transaction && new Date(transaction.created_at).toLocaleDateString("ar-EG", { day:"numeric", month:"long", year:"numeric" })}
+              </p>
+            </div>
+          </div>
+          {diff !== 0 && (
+            <div className={`px-4 py-2 rounded-xl text-sm font-black ${diff > 0 ? "bg-rose-600" : "bg-emerald-600"}`}>
+              {diff > 0 ? "▲" : "▼"} {Math.abs(diff).toLocaleString("ar-EG")} ج.م
+            </div>
+          )}
+        </div>
+      </header>
+
+      <div className="max-w-3xl mx-auto px-4 space-y-5">
+
+        {/* ══ مقارنة قبل / بعد ══ */}
+        {transaction && (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm text-center">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">الإجمالي الأصلي</p>
+              <p className="text-3xl font-black text-slate-400 line-through decoration-slate-300">
+                {transaction.amount.toLocaleString("ar-EG")} <small className="text-xs">ج</small>
+              </p>
+            </div>
+            <div className={`p-5 rounded-[2rem] shadow-sm text-center border-2 ${diff > 0 ? "bg-rose-50 border-rose-200" : diff < 0 ? "bg-emerald-50 border-emerald-200" : "bg-white border-slate-200"}`}>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">الإجمالي الجديد</p>
+              <p className={`text-3xl font-black ${diff > 0 ? "text-rose-600" : diff < 0 ? "text-emerald-600" : "text-slate-900"}`}>
+                {newTotal.toLocaleString("ar-EG")} <small className="text-xs">ج</small>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ══ جدول الأصناف ══ */}
+        <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100">
+            <h2 className="font-black text-slate-900">الأصناف</h2>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">عدّل الكميات والأسعار — المخزن هيتحدث تلقائياً</p>
+          </div>
+          <table className="w-full border-collapse">
+            <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase border-b border-slate-100">
               <tr>
                 <th className="p-5 text-right">الصنف</th>
                 <th className="p-5 text-center">الكمية</th>
-                <th className="p-5 text-center">السعر</th>
+                <th className="p-5 text-center">
+                  السعر
+                  <span className="text-[8px] text-amber-400 block normal-case font-normal">قابل للتعديل</span>
+                </th>
                 <th className="p-5 text-left">الإجمالي</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((item, index) => (
-                <tr key={index} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-5 font-black text-slate-900">{item.name}</td>
-                  <td className="p-5 text-center">
-                    {/* تعديل: إضافة step="any" لدعم الكسور */}
-                    <input 
-                      type="number"
-                      step="any"
-                      value={item.qty}
-                      onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[index].qty = e.target.value;
-                        setItems(newItems);
-                      }}
-                      className="w-20 p-2 border-2 border-slate-100 rounded-xl text-center font-black focus:border-orange-500 outline-none transition-all"
-                    />
-                  </td>
-                  <td className="p-5 text-center font-black">
-                    {/* تعديل: إضافة step="any" لدعم الكسور */}
-                    <input 
-                      type="number"
-                      step="any"
-                      value={item.price}
-                      onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[index].price = e.target.value;
-                        setItems(newItems);
-                      }}
-                      className="w-24 p-2 border-2 border-slate-100 rounded-xl text-center font-black text-orange-600 focus:border-orange-500 outline-none transition-all"
-                    />
-                  </td>
-                  <td className="p-5 text-left font-black text-slate-900">
-                    {/* تعديل العرض ليظهر خانتين عشريتين عند الحاجة */}
-                    {(Number(item.qty) * Number(item.price)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                  </td>
-                </tr>
-              ))}
+            <tbody className="divide-y divide-slate-50">
+              {items.map((item, index) => {
+                const lineTotal = Number(item.qty) * Number(item.price);
+                return (
+                  <tr key={index} className="hover:bg-slate-50/60 transition-colors">
+                    <td className="p-5">
+                      <p className="font-black text-slate-900">{item.name}</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-0.5">{item.unit}</p>
+                    </td>
+                    <td className="p-5 text-center">
+                      <input
+                        type="number" step="any"
+                        value={item.qty}
+                        onChange={e => { const c = [...items]; c[index].qty = e.target.value; setItems(c); }}
+                        className="w-20 p-2 border-2 border-slate-100 rounded-xl text-center font-black bg-slate-50 focus:border-amber-400 outline-none transition-all"
+                      />
+                    </td>
+                    <td className="p-5 text-center">
+                      <input
+                        type="number" step="any"
+                        value={item.price}
+                        onChange={e => { const c = [...items]; c[index].price = e.target.value; setItems(c); }}
+                        className="w-24 p-2 border-2 border-slate-100 rounded-xl text-center font-black text-amber-600 bg-slate-50 focus:border-amber-400 outline-none transition-all"
+                      />
+                    </td>
+                    <td className="p-5 text-left font-black text-slate-900">
+                      {lineTotal.toLocaleString("ar-EG", { maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white flex justify-between items-center shadow-2xl border-4 border-white">
-          <div>
-            <p className="text-[10px] text-slate-400 font-black mb-1 uppercase tracking-widest">إجمالي الحساب الجديد</p>
-            <h3 className="text-4xl font-black italic">
-              {/* تعديل العرض الإجمالي لدعم الكسور */}
-              {items.reduce((acc, i) => acc + (Number(i.qty) * Number(i.price)), 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} 
-              <small className="text-xs mr-2 opacity-50">ج.م</small>
-            </h3>
+        {/* ملاحظة */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-3">
+          <input
+            placeholder="📝 سبب التعديل أو ملاحظة (اختياري)..."
+            className="w-full bg-transparent font-bold text-slate-700 outline-none text-sm placeholder:text-slate-300"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+          />
+        </div>
+
+        {/* ══ شريط الحساب ══ */}
+        <div className="bg-[#0f172a] p-7 rounded-[2.5rem] text-white shadow-2xl">
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div>
+              <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">إجمالي جديد</p>
+              <p className="text-2xl font-black">{newTotal.toLocaleString("ar-EG")} <small className="text-xs opacity-50">ج</small></p>
+            </div>
+            <div>
+              <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">تأثير على المديونية</p>
+              <p className={`text-2xl font-black ${diff > 0 ? "text-rose-400" : diff < 0 ? "text-emerald-400" : "text-slate-400"}`}>
+                {diff === 0 ? "لا تغيير" : `${diff > 0 ? "+" : ""}${diff.toLocaleString("ar-EG")} ج`}
+              </p>
+            </div>
           </div>
-          <button 
-            onClick={handleUpdate}
+          <button
+            onClick={() => setShowConfirm(true)}
             disabled={isSaving}
-            className="bg-orange-500 hover:bg-orange-400 text-white px-10 py-5 rounded-2xl font-black text-xl shadow-xl transition-all active:scale-95 disabled:opacity-50"
+            className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-5 rounded-2xl font-black text-xl transition-all active:scale-[0.99] shadow-xl"
           >
-            {isSaving ? "جاري الحفظ..." : "حفظ التعديلات ✅"}
+            {isSaving ? "⏳ جاري الحفظ..." : "حفظ التعديلات ✅"}
           </button>
         </div>
       </div>
 
+      {/* ══ Modal تأكيد ══ */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl text-center space-y-5" dir="rtl">
+            <div className="text-5xl">⚠️</div>
+            <h3 className="text-xl font-black text-slate-900">تأكيد التعديل</h3>
+            <p className="text-sm text-slate-500 font-bold leading-relaxed">
+              هيتم تحديث المخزن ومديونية المورد تلقائياً.
+            </p>
+            {diff !== 0 && (
+              <div className={`px-4 py-3 rounded-2xl text-sm font-black ${diff > 0 ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
+                {diff > 0
+                  ? `⬆️ مديونية المورد ستزيد ${Math.abs(diff).toLocaleString("ar-EG")} ج.م`
+                  : `⬇️ مديونية المورد ستنقص ${Math.abs(diff).toLocaleString("ar-EG")} ج.م`
+                }
+              </div>
+            )}
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={handleUpdate}
+                className="flex-1 bg-[#0f172a] hover:bg-indigo-700 text-white py-4 rounded-2xl font-black transition-all active:scale-95"
+              >
+                تأكيد ✅
+              </button>
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="px-6 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black hover:bg-slate-200 transition-all"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
-        body { font-family: 'Cairo', sans-serif; }
+        body { font-family: 'Cairo', sans-serif; background-color: #f1f5f9; }
       `}</style>
     </div>
   );
