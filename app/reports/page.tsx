@@ -10,10 +10,12 @@ interface MonthlyRow {
   month: string;
   total_revenue: number;
   total_profit: number;
-  new_debt: number;
-  collected: number;
-  net_debt: number;
+  new_debt: number;      // sale - payment (ما فضل على ذمة العميل)
+  collected: number;     // payment + تحصيل نقدي (كل ما دفعه)
+  net_debt: number;      // new_debt - تحصيل نقدي اللاحق
   expenses: number;
+  payment_with_invoice: number;  // كاش دفعه مع الفاتورة
+  cash_later: number;            // تحصيل نقدي منفصل لاحق
 }
 
 interface CustomerDebt {
@@ -34,7 +36,7 @@ const MONTHS_AR = [
 ];
 
 const SALE_TYPES    = ["sale", "بيع"];
-const PAYMENT_TYPES = ["payment", "دفع", "تحصيل نقدي", "تحصيل"];
+const PAYMENT_TYPES = ["payment", "تحصيل نقدي", "دفع", "تحصيل"];
 
 function fmt(n: number) {
   return n.toLocaleString("ar-EG", { maximumFractionDigits: 0 });
@@ -63,20 +65,30 @@ async function fetchMonthlyData(year: number): Promise<MonthlyRow[]> {
   for (const row of data ?? []) {
     const d   = new Date(row.created_at);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
-    if (!map.has(key)) map.set(key, { month: key, total_revenue: 0, total_profit: 0, new_debt: 0, collected: 0, net_debt: 0, expenses: 0 });
+    if (!map.has(key)) map.set(key, { month: key, total_revenue: 0, total_profit: 0, new_debt: 0, collected: 0, net_debt: 0, expenses: 0, payment_with_invoice: 0, cash_later: 0 });
     const m = map.get(key)!;
     const t = row.type as string;
     if (SALE_TYPES.includes(t)) {
       m.total_revenue += Number(row.amount) || 0;
       m.total_profit  += Number(row.profit)  || 0;
-    } else if (PAYMENT_TYPES.includes(t)) {
-      m.collected += Number(row.amount) || 0;
-    } else {
-      m.new_debt  += Number(row.amount) || 0;
+      // الفاتورة كلها = دين مبدئي
+      m.new_debt += Number(row.amount) || 0;
+    } else if (t === "payment") {
+      // كاش دفعه مع الفاتورة → بيخصم من الدين الجديد
+      const amt = Number(row.amount) || 0;
+      m.payment_with_invoice += amt;
+      m.new_debt  -= amt;   // الدين الجديد = sale - payment
+      m.collected += amt;   // التحصيلات = payment + تحصيل نقدي
+    } else if (t === "تحصيل نقدي") {
+      // تحصيل نقدي لاحق منفصل
+      const amt = Number(row.amount) || 0;
+      m.cash_later += amt;
+      m.collected  += amt;  // يضاف للتحصيلات
     }
   }
   for (const m of map.values()) {
-    m.net_debt = m.new_debt - m.collected;
+    // صافي الديون = (sale - payment) - تحصيل نقدي لاحق
+    m.net_debt = m.new_debt - m.cash_later;
     m.expenses = m.total_revenue - m.total_profit;
   }
   return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
@@ -139,7 +151,7 @@ export default function ReportsPage() {
   const totalDebt      = customers.reduce((s, c) => s + Math.max(c.balance, 0), 0);
   const debtorCount    = customers.filter(c => c.balance > 0).length;
   const profitMargin   = totalRevenue ? Math.round((totalProfit / totalRevenue) * 100) : 0;
-  const collectRate    = totalNewDebt > 0 ? Math.min(Math.round((totalCollected / totalNewDebt) * 100), 100) : 0;
+  const collectRate    = totalRevenue > 0 ? Math.min(Math.round((totalCollected / totalRevenue) * 100), 100) : 0;
 
   const bestMonth  = monthly.length ? monthly.reduce((a, b) => b.total_profit > a.total_profit ? b : a) : null;
   const topDebtor  = customers.filter(c => c.balance > 0).sort((a, b) => b.balance - a.balance)[0] || null;
@@ -249,7 +261,7 @@ export default function ReportsPage() {
                 </div>
                 <div className="flex justify-between text-[10px] font-black text-slate-400 mt-2">
                   <span>تم تحصيل {fmt(totalCollected)} ج.م</span>
-                  <span>من أصل {fmt(totalNewDebt)} ج.م</span>
+                  <span>من أصل {fmt(totalRevenue)} ج.م (إجمالي المبيعات)</span>
                 </div>
               </div>
             )}
@@ -331,8 +343,8 @@ export default function ReportsPage() {
                           <td className="p-5 font-black text-emerald-400">{fmt(totalProfit)} ج</td>
                           <td className="p-5 font-black">{fmt(totalNewDebt)} ج</td>
                           <td className="p-5 font-black text-emerald-400">{fmt(totalCollected)} ج</td>
-                          <td className={`p-5 font-black ${totalNewDebt > totalCollected ? "text-rose-400" : "text-emerald-400"}`}>
-                            {fmt(totalNewDebt - totalCollected)} ج
+                          <td className={`p-5 font-black ${monthly.reduce((s,r)=>s+r.net_debt,0) > 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                            {fmt(monthly.reduce((s,r)=>s+r.net_debt,0))} ج
                           </td>
                           <td className="p-5 font-black text-slate-400">—</td>
                         </tr>
