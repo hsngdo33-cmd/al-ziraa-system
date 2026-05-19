@@ -39,7 +39,11 @@ export default function SuppliersPage() {
   async function handleAddSupplier() {
     if (!newSupp.name.trim()) return alert("الاسم مطلوب!");
     setSaving(true);
-    await supabase.from("suppliers").insert([newSupp]);
+    await supabase.from("suppliers").insert([{
+      name:    newSupp.name,
+      phone:   newSupp.phone || null,
+      balance: newSupp.balance === "" ? 0 : Number(newSupp.balance),
+    }]);
     setNewSupp({ name: "", phone: "", balance: "" });
     setShowAddModal(false);
     setSaving(false);
